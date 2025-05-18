@@ -1,0 +1,67 @@
+package com.example.demo.micserver.response;
+
+import com.example.demo.micserver.request.InsuranceRefundFee;
+import lombok.Data;
+
+@Data
+public class DetailContractResponse {
+    private String rootId;
+    private String rootPolicyNo;
+    private String contractId;
+    private String terminationDate;
+    private String cusName;
+    private String cusAddress;
+    private String beneficiaryName;
+    private String policyStartDate;
+    private String policyEndDate;
+    private String remainingDate;
+    private String currencyType;
+    private Boolean insuranceRefund;
+    private String cusType;
+    private String invoiceNo;
+    private String invoiceMethod;
+    private String invoiceMethodName;
+    private Boolean feeRefundRequest;
+    private Boolean taxRefundRequest;
+    private String requestType;
+    private String requestTypeName;
+    private String requester;
+    private String requesterName;
+    private String reasonCode;
+    private String reasonName;
+    private String compensationRate;
+    private Boolean compensationReceived;
+    private String preTaxFeeOldOfContract;
+    private String taxAmountOldOfContract;
+    private String postTaxFeeOldOfContract;
+    private String preTaxFeeOfContract;
+    private String taxAmountOfContract;
+    private String postTaxFeeOfContract;
+    private InsuranceRefundFee insuranceRefundFee;
+    private Boolean dataCustomer;
+    private String contractRate;
+    private String cusTax;
+    private String feeAttachment;
+    private String distributionType;
+    private String distributionChannel;
+    private String coInsuredTaxCode;
+    private String coInsuredEmails;
+    private String coInsuredAddress;
+    private String coEnterprisesName;
+    private String cusEmail;
+    private String paymentMethod;
+    private String paymentMethodName;
+    private String documentNo;
+    private String rateType;
+    private String rateTypeName;
+    private String payOption;
+    private String payOptionName;
+    private String issuedCurrencyType;
+    private String negotiableRate;
+    private Integer exchangeRate;
+    private String invoiceType;
+    private String invoiceTypeName;
+    private String distributionCode;
+    private Boolean cfgTermRecommendAmount;
+    private Boolean refundConfigured;
+}
