@@ -8,6 +8,7 @@ import com.example.demo.micserver.response.ContractContent;
 import com.example.demo.micserver.response.DetailContractResponse;
 import com.example.demo.micserver.response.UploadFileResponse;
 import com.example.demo.ulti.DateTimeUtils;
+import com.example.demo.ulti.TokenUtils;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
@@ -17,43 +18,72 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.time.LocalDateTime;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
+import java.util.stream.Collectors;
 
+@Slf4j
 @Service
 @AllArgsConstructor
-@Slf4j
-public class TerminationContractService {
+public class TerminationContractServiceAsync {
   private final GetInsInfoClient getInsInfoClient;
   private final TerminationContractClient terminationContractClient;
   private final DetailContractClient detailContractClient;
   private final ExcelService excelService;
   private final AlfrescoUploadClient uploadClient;
+  private final TokenUtils tokenUtils;
 
   public Result terminationContract(MultipartFile file) {
     Result result = new Result();
-    result.setListNoContract(new ArrayList<>());
-    result.setListError(new ArrayList<>());
-    result.setListDone(new ArrayList<>());
+    result.setListNoContract(Collections.synchronizedList(new ArrayList<>()));
+    result.setListError(Collections.synchronizedList(new ArrayList<>()));
+    result.setListDone(Collections.synchronizedList(new ArrayList<>()));
+
     try {
-      List<String> codes;
-      try {
-        codes = excelService.readCodes(file.getInputStream());
-      } catch (Exception e) {
-        return null;
-      }
+      List<String> codes = excelService.readCodes(file.getInputStream());
+
       if (CollectionUtils.isEmpty(codes)) {
-        log.info("[TerminationContractService] No codes found");
+        log.info("No codes found");
         return null;
       }
 
       result.setTotal(codes.size());
 
-      codes.forEach(s -> {
-        callTerminationContract(result, s);
-      });
+      callTerminationContract(TokenHolder.getToken(), result, codes);
     } catch (Exception e) {
-      System.out.println(e.getMessage());
+      log.error("terminationContract, read excel error", e);
     }
     return result;
+  }
+
+  private void callTerminationContract(String token, Result result, List<String> codes) {
+    List<DetailContractResponse> detailContractResponses = fetchContractDetails(token, codes, result);
+
+    if(CollectionUtils.isEmpty(detailContractResponses)) {
+      log.info("No detail contract found");
+      return;
+    }
+
+    log.info("Process with total: {}", detailContractResponses.size());
+
+    detailContractResponses.forEach(detail -> {
+      log.info("policy detail process: {}", detail.getRootPolicyNo());
+    });
+
+    tokenUtils.renewToken();
+    token = TokenHolder.getToken();
+
+    List<UploadFileResponse> uploadFileResponses = uploadFiles(token, detailContractResponses.size());
+    if(!CollectionUtils.isEmpty(uploadFileResponses)) {
+      try {
+        for (int i = 0; i< detailContractResponses.size(); i++) {
+          detailContractResponses.get(i).setUploadFileResponse(uploadFileResponses.get(i));
+        }
+      } catch (Exception e) {
+        log.info("uploadFileResponses, uploadFileResponses error", e);
+      }
+    }
+
+    terminateContracts(detailContractResponses, result, token);
   }
 
   private InfoSearchRequest buildInfoSearchRequest(String policy) {
@@ -73,20 +103,6 @@ public class TerminationContractService {
         .businessTypeCode("")
         .distributionSearch("")
         .build();
-  }
-
-
-  private void callTerminationContract(Result result, String policy) {
-    InfoSearchRequest infoSearchRequest = buildInfoSearchRequest(policy);
-    List<ContractContent> contractContents = getInsInfoClient.callSearchContract(infoSearchRequest, TokenHolder.getToken(), result);
-    if (!CollectionUtils.isEmpty(contractContents)) {
-      for (ContractContent contractContent : contractContents) {
-        DetailContractResponse detailContract = detailContractClient.getDetailContract(contractContent.getId(), policy, TokenHolder.getToken(), result);
-        UploadFileResponse uploadFileResponse = uploadClient.uploadFileToAlfresco(TokenHolder.getToken());
-        TerminationContractRequest terRequest = toTerminationContractRequest(detailContract, uploadFileResponse);
-        terminationContractClient.callTerminationContract(TokenHolder.getToken(), terRequest, result);
-      }
-    }
   }
 
   private TerminationContractRequest toTerminationContractRequest(DetailContractResponse detail, UploadFileResponse fileResponse) {
@@ -147,6 +163,14 @@ public class TerminationContractService {
   }
 
   private Attachment buildAttachment(UploadFileResponse fileResponse) {
+    if(fileResponse == null) {
+      return Attachment.builder()
+          .id("016d14f5-abd8-48f9-9b4b-75d56f8829cc")
+          .fileName("huy.pdf")
+          .legacyName("huy.pdf")
+          .isUploadNew(false)
+          .build();
+    }
     return Attachment.builder()
         .id(fileResponse.getId())
         .fileName(fileResponse.getName())
@@ -157,5 +181,68 @@ public class TerminationContractService {
         .insuredId(fileResponse.getInsuredId())
         .type(fileResponse.getType())
         .build();
+  }
+
+  private List<DetailContractResponse> fetchContractDetails(String token, List<String> codes, Result result) {
+    List<CompletableFuture<List<DetailContractResponse>>> futures = codes.stream()
+        .map(code -> CompletableFuture.supplyAsync(() -> searchContracts(token, code, result))
+            .thenCompose(contents -> {
+              if (contents == null || contents.isEmpty()) {
+                result.getListNoContract().add(code);
+                return CompletableFuture.completedFuture(Collections.emptyList());
+              }
+              return fetchDetails(token, code, contents, result);
+            })
+        ).toList();
+
+    return futures.stream()
+        .map(CompletableFuture::join)
+        .filter(Objects::nonNull)
+        .flatMap(Collection::stream)
+        .collect(Collectors.toList());
+  }
+
+  private List<ContractContent> searchContracts(String token, String policy, Result result) {
+    InfoSearchRequest infoSearchRequest = buildInfoSearchRequest(policy);
+    return getInsInfoClient.callSearchContract(infoSearchRequest, token, result);
+  }
+
+  private CompletableFuture<List<DetailContractResponse>> fetchDetails(String token, String policy,
+                                                                       List<ContractContent> contractContents,
+                                                                       Result result) {
+    if (CollectionUtils.isEmpty(contractContents)) {
+      return CompletableFuture.completedFuture(Collections.emptyList());
+    }
+
+    List<CompletableFuture<DetailContractResponse>> detailFutures = contractContents.stream().map(contractContent ->
+        CompletableFuture.supplyAsync(() -> detailContractClient.getDetailContract(contractContent.getId(), policy, token, result))).toList();
+
+    return CompletableFuture.allOf(detailFutures.toArray(new CompletableFuture[0]))
+        .thenApply(v -> detailFutures.stream().map(CompletableFuture::join).filter(Objects::nonNull).collect(Collectors.toList()));
+  }
+
+  private List<UploadFileResponse> uploadFiles(String token, int size) {
+    List<UploadFileResponse> uploadedDetails = new ArrayList<>();
+    for (int i = 0; i < size; i++) {
+      UploadFileResponse uploadFileResponse = uploadClient.uploadFileToAlfresco(token);
+      if (Objects.nonNull(uploadFileResponse)) {
+        uploadedDetails.add(uploadFileResponse);
+      }
+    }
+
+    return uploadedDetails;
+  }
+
+  private void terminateContracts(List<DetailContractResponse> contractDetails, Result result, String token) {
+    List<CompletableFuture<Void>> terminateFutures = contractDetails.stream()
+        .map(detail -> CompletableFuture.runAsync(() -> {
+          try {
+            TerminationContractRequest req = toTerminationContractRequest(detail, detail.getUploadFileResponse());
+            terminationContractClient.callTerminationContract(token, req, result);
+          } catch (Exception e) {
+            result.getListError().add(detail.getRootPolicyNo());
+          }
+        })).toList();
+    terminateFutures.forEach(CompletableFuture::join);
   }
 }

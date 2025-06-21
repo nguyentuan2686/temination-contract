@@ -1,18 +1,26 @@
 package com.example.demo.filter;
 
-public class TokenHolder {
-    private static final ThreadLocal<String> TOKEN = new ThreadLocal<>();
+import org.springframework.stereotype.Component;
 
-    public static void setToken(String token) {
-        TOKEN.set(token);
+@Component
+public class TokenHolder {
+    private static String token;
+    private static String refreshToken;
+
+    public static synchronized void setToken(String t) {
+        token = t;
+    }
+
+    public static synchronized void setRefreshToken(String rt) {
+        refreshToken = rt;
     }
 
     public static String getToken() {
-        return TOKEN.get();
+        return token;
     }
 
-    public static void clear() {
-        TOKEN.remove();
+    public static String getRefreshToken() {
+        return refreshToken;
     }
 }
 

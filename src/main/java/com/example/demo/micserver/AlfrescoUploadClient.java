@@ -6,6 +6,7 @@ import com.example.demo.micserver.response.DetailContractResponse;
 import com.example.demo.micserver.response.UploadFileResponse;
 import com.example.demo.modal.ApiResponse;
 import lombok.AllArgsConstructor;
+import lombok.extern.log4j.Log4j2;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.http.*;
@@ -21,12 +22,13 @@ import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
+@Log4j2
 @Service
 @AllArgsConstructor
 public class AlfrescoUploadClient {
   private final RestTemplate restTemplate;
 
-  public UploadFileResponse uploadFileToAlfresco(String token, String policy, Result result) {
+  public UploadFileResponse uploadFileToAlfresco(String token) {
     try {
       ClassPathResource pdfFile = new ClassPathResource("static/huy.pdf");
 
@@ -37,7 +39,6 @@ public class AlfrescoUploadClient {
       headers.set("Accept-Language", "vi");
       headers.set("clientMessageId", UUID.randomUUID().toString());
 
-      // Tạo body multipart
       MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
 
       body.add("files", new MultipartInputStreamFileResource(pdfFile.getInputStream(), pdfFile.getFilename()));
@@ -58,13 +59,13 @@ public class AlfrescoUploadClient {
       );
 
       if (Objects.isNull(response.getBody()) || response.getBody().getHttpStatus() != 200 || CollectionUtils.isEmpty(response.getBody().getData())) {
-        result.getListError().add(policy);
         return null;
       }
       return response.getBody().getData().getFirst();
 
     } catch (Exception e) {
-      throw new RuntimeException("Upload failed: " + e.getMessage(), e);
+      log.error("Upload failed: ", e);
+      return null;
     }
   }
 }

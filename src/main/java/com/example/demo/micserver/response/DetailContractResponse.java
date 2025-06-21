@@ -64,4 +64,5 @@ public class DetailContractResponse {
     private String distributionCode;
     private Boolean cfgTermRecommendAmount;
     private Boolean refundConfigured;
+    private UploadFileResponse uploadFileResponse;
 }
